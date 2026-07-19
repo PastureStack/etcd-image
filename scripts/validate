@@ -1,0 +1,137 @@
+#!/bin/bash
+set -euo pipefail
+
+repo_root=$(cd "$(dirname "$0")/.." && pwd)
+cd "${repo_root}"
+
+bash -n scripts/validate scripts/test-data-lifecycle.sh scripts/test-three-member-mtls.sh
+
+required_markers=(
+    'VERSION ?= 3.7.2'
+    'IMAGE_TAG ?= v$(VERSION)'
+    'ARG IMAGE_VERSION=3.7.2'
+    'ARG UPSTREAM_TAG=v3.7.1'
+    'ARG UPSTREAM_VERSION=3.7.1'
+    'ARG UPSTREAM_GO_VERSION=1.26.5'
+    'ARG UPSTREAM_INSECURE_TEST_KEY_SHA256=0db733264aec410f13fc95dc01c8c8956d870f7225c81e68d83a8035e0867d5a'
+    'ARG UPSTREAM_COMMIT=5e7fd0de9a57db03ecc11794dc40403a734c07bb'
+    'ARG UPSTREAM_ARCHIVE_SHA256=a9254be36198b8240fe1a5ea8018e67d9fdc148146888e7dec60c019ddc8870c'
+    'ARG GO_VERSION=1.26.5'
+    'ARG GO_X_TEXT_VERSION=0.39.0'
+    'ubuntu:26.04@sha256:678c6550cc43645e08669028bc177f50be4e7c5b8cca677067b1914d4afc7a03'
+    '20260808T000000Z'
+    'org.opencontainers.image.version="${IMAGE_VERSION}"'
+    'io.pasturestack.upstream.version="${UPSTREAM_VERSION}"'
+    'Run isolated three-member mTLS quorum recovery'
+    'client_mtls=passed'
+    'missing_client_certificate_rejected=passed'
+    'rogue_client_certificate_rejected=passed'
+    'quorum_loss_write_rejected=passed'
+    'lost_quorum_write_unapplied_before_recovery=passed'
+    'member_replacement=passed'
+    'replacement_learner_catchup=passed'
+    'replacement_promoted=passed'
+    '.Status.raftIndex'
+    '.Status.raftAppliedIndex'
+    '.Status.isLearner == true'
+    'network_partition=passed'
+    'initial_key_count=100'
+    'final_key_count=104'
+    '--client-cert-auth=true'
+    '--peer-client-cert-auth=true'
+    'docker network create --internal'
+    'PastureStack is an independent community effort to preserve, audit, and modernize the Rancher 1.6 ecosystem. It is not affiliated with or endorsed by Rancher Labs or SUSE.'
+)
+
+for marker in "${required_markers[@]}"; do
+    if ! grep -R -Fq -- "${marker}" \
+        Dockerfile Makefile README.md ORIGIN.md COMPATIBILITY.md SECURITY.md \
+        package scripts .github 2>/dev/null; then
+        echo "ETCD_IMAGE_REQUIRED_MARKER_MISSING marker=${marker}" >&2
+        exit 1
+    fi
+done
+
+while IFS='=' read -r name value; do
+    case "${name}" in
+        UPSTREAM_REPOSITORY|UPSTREAM_TAG|UPSTREAM_VERSION|UPSTREAM_GO_VERSION|UPSTREAM_INSECURE_TEST_KEY_SHA256|UPSTREAM_TAG_OBJECT|UPSTREAM_COMMIT|UPSTREAM_ARCHIVE_SHA256|UPSTREAM_SOURCE_DATE_EPOCH|UPSTREAM_LICENSE_SHA256) ;;
+        ''|'#'*) continue ;;
+        *) echo "ETCD_IMAGE_UNKNOWN_SOURCE_LOCK_FIELD field=${name}" >&2; exit 1 ;;
+    esac
+    test -n "${value}"
+done < package/upstream-source.lock
+
+. package/upstream-source.lock
+test "${UPSTREAM_REPOSITORY}" = etcd-io/etcd
+test "${UPSTREAM_TAG}" = v3.7.1
+test "${UPSTREAM_VERSION}" = 3.7.1
+test "${UPSTREAM_GO_VERSION}" = 1.26.5
+test "${UPSTREAM_INSECURE_TEST_KEY_SHA256}" = 0db733264aec410f13fc95dc01c8c8956d870f7225c81e68d83a8035e0867d5a
+test "${UPSTREAM_TAG_OBJECT}" = ccd265ad64d16343b616416860e3ebe7ddd1ab83
+test "${UPSTREAM_COMMIT}" = 5e7fd0de9a57db03ecc11794dc40403a734c07bb
+test "${UPSTREAM_ARCHIVE_SHA256}" = a9254be36198b8240fe1a5ea8018e67d9fdc148146888e7dec60c019ddc8870c
+test "${UPSTREAM_SOURCE_DATE_EPOCH}" = 1784835042
+test "${UPSTREAM_LICENSE_SHA256}" = 43ca1b4bbf462789ba15b28373e0c536e510f49e4d05d85a7690cfee94de6f49
+
+if grep -R -Eiq \
+    'v[0-9]+\.[0-9]+\.[0-9]+-(pasturestack|rancher)[0-9.]*' \
+    Dockerfile Makefile README.md ORIGIN.md COMPATIBILITY.md SECURITY.md \
+    LICENSE-STATUS.md package scripts security .github 2>/dev/null; then
+    echo ETCD_IMAGE_BRANDED_VERSION_SUFFIX_PRESENT >&2
+    exit 1
+fi
+
+if grep -R -Eiq \
+    '(IMAGE_VERSION|IMAGE_TAG|VERSION[[:space:]]*[?]?=).*(k3s|poc|pasturestack|rancher)' \
+    --exclude=validate Dockerfile Makefile scripts .github 2>/dev/null; then
+    echo ETCD_IMAGE_NON_NUMERIC_PRODUCT_VERSION_PRESENT >&2
+    exit 1
+fi
+
+if [ "$(grep -Fc '"status":"not_affected"' security/openvex.json)" -ne 46 ] || \
+   [ "$(grep -Fc '"justification":"vulnerable_code_not_present"' security/openvex.json)" -ne 46 ] || \
+   [ "$(grep -Fc 'pkg:deb/ubuntu/linux-libc-dev@7.0.0-29.29?arch=amd64&distro=ubuntu-26.04' security/openvex.json)" -ne 46 ]; then
+    echo ETCD_IMAGE_OPENVEX_SCOPE_CHANGED >&2
+    exit 1
+fi
+
+if [ "$(grep -Fc 'URIs: https://snapshot.ubuntu.com/ubuntu/%s/' Dockerfile)" -ne 1 ]; then
+    echo ETCD_IMAGE_UBUNTU_SNAPSHOT_COVERAGE_CHANGED >&2
+    exit 1
+fi
+
+if [ "$(grep -Fc 'Acquire::https::CaInfo' Dockerfile)" -ne 1 ]; then
+    echo ETCD_IMAGE_UBUNTU_CA_BINDING_CHANGED >&2
+    exit 1
+fi
+
+if grep -Fq 'apt-get --snapshot' Dockerfile; then
+    echo ETCD_IMAGE_UBUNTU_SNAPSHOT_FALLBACK_PRESENT >&2
+    exit 1
+fi
+
+if grep -R -Eiq \
+    'C:\\Users\\|/home/[^/[:space:]]+/(pstk|source|rc[0-9]+)|10\.0\.0\.[0-9]{1,3}|[[:alnum:]._%+-]+@[[:alnum:].-]+\.[[:alpha:]]{2,}|github_pat_|gh[pousr]_' \
+    --exclude=validate Dockerfile Makefile README.md ORIGIN.md COMPATIBILITY.md SECURITY.md \
+    LICENSE-STATUS.md UNOFFICIAL_MAINTENANCE_FORK.md package scripts security .github 2>/dev/null; then
+    echo ETCD_IMAGE_PRIVATE_OR_STAGING_REFERENCE_PRESENT >&2
+    exit 1
+fi
+
+if grep -R -Eioh 'ghcr\.io/[a-z0-9._-]+/' \
+    Dockerfile Makefile README.md ORIGIN.md COMPATIBILITY.md SECURITY.md \
+    package scripts security .github 2>/dev/null \
+    | grep -Ev '^ghcr\.io/pasturestack/$' >/dev/null; then
+    echo ETCD_IMAGE_UNAPPROVED_REGISTRY_NAMESPACE_PRESENT >&2
+    exit 1
+fi
+
+if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    boundary_license=$(git ls-tree 359993833c0f2855feedb478a1bd1262f4900168 LICENSE | awk '{print $3}')
+    current_license=$(git hash-object --path=LICENSE LICENSE)
+    test "${boundary_license}" = 2eb95ede392fef266b15e0903a24fd193fb53c48
+    test "${current_license}" = "${boundary_license}"
+    git diff --check
+fi
+
+echo ETCD_IMAGE_VALIDATION_OK

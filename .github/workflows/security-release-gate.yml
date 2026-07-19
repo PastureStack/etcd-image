@@ -1,0 +1,283 @@
+name: Manual security and data lifecycle gate
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: etcd-image-security-main
+  cancel-in-progress: false
+
+jobs:
+  security-and-data-lifecycle:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      CANDIDATE_IMAGE: pasturestack/etcd-image:v3.7.2
+      REPRO_IMAGE: pasturestack/etcd-image:repro-check
+      BASELINE_IMAGE: pasturestack/etcd-image-baseline:v3.6.14
+      BUILDER_IMAGE: pasturestack-etcd-image-builder:security-gate
+      ARM64_BUILDER_IMAGE: pasturestack-etcd-image-builder:arm64-gate
+      INIT_IMAGE: ubuntu:26.04@sha256:678c6550cc43645e08669028bc177f50be4e7c5b8cca677067b1914d4afc7a03
+      TRIVY_IMAGE: aquasec/trivy:0.73.0@sha256:7cced7cae583819fc7806d4cbc0dbbc7cad18b99f7d3e235192e6da8c091045c
+      TRIVY_CACHE_DIR: /tmp/pasturestack-etcd-image-trivy
+
+    steps:
+      - name: Check out candidate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate source controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          test "$(git branch --show-current)" = main
+          test "$(git rev-list --count 359993833c0f2855feedb478a1bd1262f4900168..HEAD)" -eq 1
+          test "$(git rev-parse HEAD^)" = 359993833c0f2855feedb478a1bd1262f4900168
+          test -z "$(git status --porcelain)"
+          bash scripts/validate
+          jq -e '.statements | length == 46' security/openvex.json >/dev/null
+          jq -e '[.statements[].status] | all(. == "not_affected")' security/openvex.json >/dev/null
+          printf '%s\n' "${GITHUB_SHA}" > dist/source-revision.txt
+          cp package/ubuntu-apt.lock package/upstream-source.lock security/openvex.json dist/
+
+      - name: Run source tests and build exact images
+        shell: bash
+        run: |
+          set -euo pipefail
+          candidate_args=(
+            --build-arg UPSTREAM_REPOSITORY=etcd-io/etcd
+            --build-arg UPSTREAM_TAG=v3.7.1
+            --build-arg UPSTREAM_VERSION=3.7.1
+            --build-arg UPSTREAM_GO_VERSION=1.26.5
+            --build-arg UPSTREAM_COMMIT=5e7fd0de9a57db03ecc11794dc40403a734c07bb
+            --build-arg UPSTREAM_ARCHIVE_SHA256=a9254be36198b8240fe1a5ea8018e67d9fdc148146888e7dec60c019ddc8870c
+            --build-arg SOURCE_DATE_EPOCH=1784835042
+            --build-arg IMAGE_VERSION=3.7.2
+            --build-arg SOURCE_REVISION="${GITHUB_SHA}"
+          )
+          baseline_args=(
+            --build-arg UPSTREAM_REPOSITORY=k3s-io/etcd
+            --build-arg UPSTREAM_TAG=v3.6.14-k3s1
+            --build-arg UPSTREAM_VERSION=3.6.14
+            --build-arg UPSTREAM_GO_VERSION=1.25.12
+            --build-arg UPSTREAM_COMMIT=0ca4081495717183b0741606dbaa6e330cdcf5bc
+            --build-arg UPSTREAM_ARCHIVE_SHA256=89a98f636a93b6d4b7a783174a6b4a8e539d65c9e8b316cd0fd060637edb1a56
+            --build-arg SOURCE_DATE_EPOCH=1784841121
+            --build-arg IMAGE_VERSION=3.6.14
+            --build-arg SOURCE_REVISION=baseline-test-only
+          )
+
+          docker build --pull --target etcd-test "${candidate_args[@]}" .
+          docker build --target etcd-builder "${candidate_args[@]}" --tag "${BUILDER_IMAGE}" .
+          docker build "${candidate_args[@]}" --tag "${CANDIDATE_IMAGE}" .
+          docker build "${baseline_args[@]}" --tag "${BASELINE_IMAGE}" .
+
+          test "$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' "${CANDIDATE_IMAGE}")" = 3.7.2
+          test "$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' "${CANDIDATE_IMAGE}")" = "${GITHUB_SHA}"
+          test "$(docker image inspect --format '{{ index .Config.Labels "io.pasturestack.upstream.version" }}' "${CANDIDATE_IMAGE}")" = 3.7.1
+          docker run --rm --network none "${CANDIDATE_IMAGE}" --version | tee dist/etcd-version.txt
+          grep -F 'etcd Version: 3.7.2' dist/etcd-version.txt
+          docker run --rm --network none --entrypoint /usr/local/bin/etcdctl "${CANDIDATE_IMAGE}" version | tee dist/etcdctl-version.txt
+          grep -F 'etcdctl version: 3.7.2' dist/etcdctl-version.txt
+          docker run --rm --network none --entrypoint /usr/local/bin/etcdutl "${CANDIDATE_IMAGE}" version | tee dist/etcdutl-version.txt
+          grep -F 'etcdutl version: 3.7.2' dist/etcdutl-version.txt
+
+          mkdir -p dist/first dist/second dist/arm64
+          first_id=$(docker create "${CANDIDATE_IMAGE}")
+          trap 'docker rm -f "${first_id}" >/dev/null 2>&1 || true' EXIT
+          docker cp "${first_id}:/usr/local/bin/." dist/first/
+          docker cp "${first_id}:/usr/share/licenses/pasturestack-etcd-image/." dist/licenses/
+          docker cp "${first_id}:/usr/share/doc/pasturestack-etcd-image/." dist/runtime-docs/
+          docker rm "${first_id}"
+          trap - EXIT
+
+          docker build --no-cache "${candidate_args[@]}" --tag "${REPRO_IMAGE}" .
+          second_id=$(docker create "${REPRO_IMAGE}")
+          trap 'docker rm -f "${second_id}" >/dev/null 2>&1 || true' EXIT
+          docker cp "${second_id}:/usr/local/bin/." dist/second/
+          docker rm "${second_id}"
+          trap - EXIT
+          for binary in etcd etcdctl etcdutl; do
+            cmp "dist/first/${binary}" "dist/second/${binary}"
+          done
+          (cd dist && sha256sum first/etcd first/etcdctl first/etcdutl > reproducible-binaries.sha256)
+
+          docker build --target etcd-builder --build-arg TARGETARCH=arm64 \
+            "${candidate_args[@]}" --tag "${ARM64_BUILDER_IMAGE}" .
+          arm_id=$(docker create "${ARM64_BUILDER_IMAGE}")
+          trap 'docker rm -f "${arm_id}" >/dev/null 2>&1 || true' EXIT
+          docker cp "${arm_id}:/image-root/usr/local/bin/." dist/arm64/
+          docker rm "${arm_id}"
+          trap - EXIT
+          file dist/arm64/etcd dist/arm64/etcdctl dist/arm64/etcdutl | tee dist/arm64-file.txt
+          test "$(grep -Fc 'ARM aarch64' dist/arm64-file.txt)" -eq 3
+          docker image inspect "${CANDIDATE_IMAGE}" > dist/image-inspect.json
+
+      - name: Run isolated data lifecycle
+        shell: bash
+        env:
+          ETCD_IMAGE: pasturestack/etcd-image:v3.7.2
+          ETCD_BASELINE_IMAGE: pasturestack/etcd-image-baseline:v3.6.14
+          ETCD_INIT_IMAGE: ubuntu:26.04@sha256:678c6550cc43645e08669028bc177f50be4e7c5b8cca677067b1914d4afc7a03
+          ETCD_IMAGE_EVIDENCE_DIR: ${{ github.workspace }}/dist/data-lifecycle
+        run: |
+          set -euo pipefail
+          docker pull "${ETCD_INIT_IMAGE}"
+          bash scripts/test-data-lifecycle.sh
+
+      - name: Run isolated three-member mTLS quorum recovery
+        shell: bash
+        env:
+          ETCD_IMAGE: pasturestack/etcd-image:v3.7.2
+          ETCD_INIT_IMAGE: ubuntu:26.04@sha256:678c6550cc43645e08669028bc177f50be4e7c5b8cca677067b1914d4afc7a03
+          ETCD_IMAGE_QUORUM_EVIDENCE_DIR: ${{ github.workspace }}/dist/quorum-mtls
+        run: |
+          set -euo pipefail
+          bash scripts/test-three-member-mtls.sh
+
+      - name: Scan source and images and create SBOMs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${TRIVY_CACHE_DIR}"
+          socket_group="$(stat -c '%g' /var/run/docker.sock)"
+          docker pull "${TRIVY_IMAGE}"
+          docker run --rm --user "$(id -u):$(id -g)" \
+            -v "${TRIVY_CACHE_DIR}:/tmp/trivy-cache" \
+            "${TRIVY_IMAGE}" image --cache-dir /tmp/trivy-cache --download-db-only
+          docker run --rm --user "$(id -u):$(id -g)" \
+            -v "${TRIVY_CACHE_DIR}:/tmp/trivy-cache" \
+            -v "${GITHUB_WORKSPACE}:/workspace:ro" \
+            -v "${GITHUB_WORKSPACE}/dist:/evidence" \
+            "${TRIVY_IMAGE}" fs --cache-dir /tmp/trivy-cache \
+            --skip-db-update --scanners secret --format json \
+            --output /evidence/source-secrets.json /workspace
+
+          for image_name in "${CANDIDATE_IMAGE}" "${BUILDER_IMAGE}"; do
+            if [ "${image_name}" = "${CANDIDATE_IMAGE}" ]; then stem=candidate; else stem=builder; fi
+            docker run --rm --user "$(id -u):$(id -g)" \
+              --group-add "${socket_group}" \
+              -v /var/run/docker.sock:/var/run/docker.sock \
+              -v "${TRIVY_CACHE_DIR}:/tmp/trivy-cache" \
+              -v "${GITHUB_WORKSPACE}:/workspace:ro" \
+              -v "${GITHUB_WORKSPACE}/dist:/evidence" \
+              "${TRIVY_IMAGE}" image --cache-dir /tmp/trivy-cache \
+              --skip-db-update --scanners vuln,secret \
+              --severity CRITICAL,HIGH --format json \
+              --output "/evidence/${stem}-trivy.json" "${image_name}"
+            if [ "${stem}" = candidate ]; then
+              cp dist/candidate-trivy.json dist/candidate-applicable-trivy.json
+            else
+              docker run --rm --user "$(id -u):$(id -g)" \
+                --group-add "${socket_group}" \
+                -v /var/run/docker.sock:/var/run/docker.sock \
+                -v "${TRIVY_CACHE_DIR}:/tmp/trivy-cache" \
+                -v "${GITHUB_WORKSPACE}:/workspace:ro" \
+                -v "${GITHUB_WORKSPACE}/dist:/evidence" \
+                "${TRIVY_IMAGE}" image --cache-dir /tmp/trivy-cache \
+                --skip-db-update --scanners vuln,secret \
+                --vex /workspace/security/openvex.json \
+                --severity CRITICAL,HIGH --format json \
+                --output /evidence/builder-applicable-trivy.json "${image_name}"
+            fi
+            docker run --rm --user "$(id -u):$(id -g)" \
+              --group-add "${socket_group}" \
+              -v /var/run/docker.sock:/var/run/docker.sock \
+              -v "${TRIVY_CACHE_DIR}:/tmp/trivy-cache" \
+              -v "${GITHUB_WORKSPACE}/dist:/evidence" \
+              "${TRIVY_IMAGE}" image --cache-dir /tmp/trivy-cache \
+              --skip-db-update --scanners vuln --format cyclonedx \
+              --output "/evidence/${stem}.cdx.json" "${image_name}"
+          done
+
+      - name: Finalize and enforce evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_secrets=$(jq '[.Results[]?.Secrets[]?] | length' dist/source-secrets.json)
+
+          jq -r '.statements[] | .vulnerability.name as $cve | .products[] | [$cve, .["@id"]] | @tsv' \
+            security/openvex.json | LC_ALL=C sort -u > dist/openvex-statements.tsv
+          jq -r '.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL" or .Severity == "HIGH") | [.VulnerabilityID, .PkgIdentifier.PURL] | @tsv' \
+            dist/builder-trivy.json | LC_ALL=C sort -u > dist/builder-openvex-input.tsv
+          test "$(wc -l < dist/openvex-statements.tsv)" -eq 46
+          diff -u dist/openvex-statements.tsv dist/builder-openvex-input.tsv
+
+          candidate_raw_critical=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL")] | length' dist/candidate-trivy.json)
+          candidate_raw_high=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "HIGH")] | length' dist/candidate-trivy.json)
+          candidate_raw_secrets=$(jq '[.Results[]?.Secrets[]?] | length' dist/candidate-trivy.json)
+          builder_raw_critical=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL")] | length' dist/builder-trivy.json)
+          builder_raw_high=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "HIGH")] | length' dist/builder-trivy.json)
+          builder_raw_secrets=$(jq '[.Results[]?.Secrets[]?] | length' dist/builder-trivy.json)
+          builder_applicable_critical=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL")] | length' dist/builder-applicable-trivy.json)
+          builder_applicable_high=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "HIGH")] | length' dist/builder-applicable-trivy.json)
+          builder_applicable_secrets=$(jq '[.Results[]?.Secrets[]?] | length' dist/builder-applicable-trivy.json)
+
+          jq -n \
+            --argjson sourceSecrets "${source_secrets}" \
+            --argjson candidateRawCritical "${candidate_raw_critical}" \
+            --argjson candidateRawHigh "${candidate_raw_high}" \
+            --argjson candidateRawSecrets "${candidate_raw_secrets}" \
+            --argjson builderRawCritical "${builder_raw_critical}" \
+            --argjson builderRawHigh "${builder_raw_high}" \
+            --argjson builderRawSecrets "${builder_raw_secrets}" \
+            --argjson builderApplicableCritical "${builder_applicable_critical}" \
+            --argjson builderApplicableHigh "${builder_applicable_high}" \
+            --argjson builderApplicableSecrets "${builder_applicable_secrets}" \
+            '{source:{secrets:$sourceSecrets},candidate:{raw:{critical:$candidateRawCritical,high:$candidateRawHigh,secrets:$candidateRawSecrets}},builder:{raw:{critical:$builderRawCritical,high:$builderRawHigh,secrets:$builderRawSecrets},applicable:{critical:$builderApplicableCritical,high:$builderApplicableHigh,secrets:$builderApplicableSecrets}}}' \
+            > dist/security-counts.json
+
+          test "${source_secrets}" -eq 0
+          test "${candidate_raw_critical}" -eq 0
+          test "${candidate_raw_high}" -eq 0
+          test "${candidate_raw_secrets}" -eq 0
+          test "${builder_raw_secrets}" -eq 0
+          test "${builder_applicable_critical}" -eq 0
+          test "${builder_applicable_high}" -eq 0
+          test "${builder_applicable_secrets}" -eq 0
+          grep -Fx status=passed dist/data-lifecycle/result.env
+          grep -Fx baseline_version=3.6.14 dist/data-lifecycle/result.env
+          grep -Fx candidate_version=3.7.2 dist/data-lifecycle/result.env
+          grep -Fx status=passed dist/quorum-mtls/result.env
+          grep -Fx cluster_size_initial=3 dist/quorum-mtls/result.env
+          grep -Fx cluster_size_final=3 dist/quorum-mtls/result.env
+          grep -Fx client_mtls=passed dist/quorum-mtls/result.env
+          grep -Fx missing_client_certificate_rejected=passed dist/quorum-mtls/result.env
+          grep -Fx rogue_client_certificate_rejected=passed dist/quorum-mtls/result.env
+          grep -Fx one_member_failure=passed dist/quorum-mtls/result.env
+          grep -Fx quorum_loss_write_rejected=passed dist/quorum-mtls/result.env
+          grep -Fx quorum_recovery=passed dist/quorum-mtls/result.env
+          grep -Fx member_replacement=passed dist/quorum-mtls/result.env
+          grep -Fx replacement_learner_catchup=passed dist/quorum-mtls/result.env
+          grep -Fx replacement_promoted=passed dist/quorum-mtls/result.env
+          grep -Fx network_partition=passed dist/quorum-mtls/result.env
+          grep -Fx lost_quorum_key_absent=passed dist/quorum-mtls/result.env
+          grep -Fx lost_quorum_write_unapplied_before_recovery=passed dist/quorum-mtls/result.env
+          grep -Fx initial_key_count=100 dist/quorum-mtls/result.env
+          grep -Fx final_key_count=104 dist/quorum-mtls/result.env
+          find dist -type f ! -name SHA256SUMS -print0 | LC_ALL=C sort -z | \
+            xargs -0 sha256sum > dist/SHA256SUMS
+
+      - name: Upload review evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: etcd-image-security-evidence-${{ github.run_id }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Clean runner resources
+        if: always()
+        shell: bash
+        run: |
+          docker image rm -f \
+            "${CANDIDATE_IMAGE}" "${REPRO_IMAGE}" "${BASELINE_IMAGE}" \
+            "${BUILDER_IMAGE}" "${ARM64_BUILDER_IMAGE}" >/dev/null 2>&1 || true
+          rm -rf -- "${TRIVY_CACHE_DIR}"
