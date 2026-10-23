@@ -3,8 +3,8 @@ ARG UBUNTU_IMAGE=ubuntu:26.04@sha256:2260313b31c8c011cd2eebe728008efac1b3982be73
 ARG BUILDPLATFORM=linux/amd64
 
 FROM --platform=${BUILDPLATFORM} ${UBUNTU_IMAGE} AS ca-trust
-ADD --checksum=sha256:6077d27c6b6f8b23590cb01ff877ed8c804a67a5442cc32b5a33da10d2bd0e90 \
-    https://snapshot.ubuntu.com/ubuntu/20260808T000000Z/pool/main/c/ca-certificates/ca-certificates_20260601~26.04.1_all.deb \
+ADD --checksum=sha256:5b6326f1932cfd7be57130561dc78192f09ed9f58bfbe6606ed0c50510c3b6cd \
+    https://archive.ubuntu.com/ubuntu/pool/main/c/ca-certificates/ca-certificates_20260816ubuntu0.26.04.1_all.deb \
     /tmp/ca-certificates.deb
 ADD --checksum=sha256:c1f53878bdada693da7fb64a28c06b7dd65a43b8452e6fcad670c0d09c77f293 \
     https://snapshot.ubuntu.com/ubuntu/20260808T000000Z/pool/main/o/openssl/openssl_3.5.5-1ubuntu3.3_amd64.deb \
@@ -18,23 +18,25 @@ RUN set -eux; \
 
 FROM --platform=${BUILDPLATFORM} ${UBUNTU_IMAGE} AS source-base
 ARG BUILDARCH=amd64
-ARG GO_VERSION=1.27.0
-ARG GO_LINUX_AMD64_SHA256=675c26c449cbb18fc24b74650de1eabbae6e16f64326fd85a283fb3b58280685
-ARG GO_LINUX_ARM64_SHA256=51798d2c42d0e1c6ed7fd9f48728b4193abac9e8aad6dbac2fe96a81f5909bda
-ARG GO_X_TEXT_VERSION=0.39.0
-ARG GO_X_TEXT_SUM=UbZz4pLOvn600D6Oh6GGEI6VAmndrEBLv8/6BEXzyus=
-ARG GO_X_TEXT_GO_MOD_SUM=3UwRclnC2g0TU9x8PZiyfOajCd1zaUNHF9cvqcQZ+ZM=
+ARG GO_VERSION=1.27.3
+ARG GO_LINUX_AMD64_SHA256=65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40
+ARG GO_LINUX_ARM64_SHA256=a06e99309dbcbdca1a8ccd2282c3ee146e55930886e26b4f1193269587165f49
+ARG GO_X_TEXT_VERSION=0.42.0
+ARG GO_X_TEXT_SUM=JbOZXgfeCPU9gacVtYliJqOhD+zhrEqK4LfdpmlUZqI=
+ARG GO_X_TEXT_GO_MOD_SUM=ojzP1Z+2QtioaF8DTtO8K5q7JWVVYwZKenzujK0Zd0E=
 ARG GO_X_TEXT_LICENSE_SHA256=911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad
 ARG UPSTREAM_REPOSITORY=etcd-io/etcd
 ARG UPSTREAM_TAG=v3.7.1
 ARG UPSTREAM_VERSION=3.7.1
-ARG UPSTREAM_GO_VERSION=1.27.0
+ARG UPSTREAM_GO_VERSION=1.26.5
 ARG UPSTREAM_INSECURE_TEST_KEY_SHA256=0db733264aec410f13fc95dc01c8c8956d870f7225c81e68d83a8035e0867d5a
 ARG UPSTREAM_COMMIT=5e7fd0de9a57db03ecc11794dc40403a734c07bb
 ARG UPSTREAM_ARCHIVE_SHA256=a9254be36198b8240fe1a5ea8018e67d9fdc148146888e7dec60c019ddc8870c
 ARG SOURCE_DATE_EPOCH=1784835042
 
 COPY package/ubuntu-apt.lock /tmp/ubuntu-apt.lock
+COPY package/ubuntu-security-packages.lock /tmp/ubuntu-security-packages.lock
+COPY scripts/install-ubuntu-security-updates /usr/local/bin/install-ubuntu-security-updates
 COPY --from=ca-trust /etc/ca-certificates.conf /etc/ca-certificates.conf
 COPY --from=ca-trust /etc/ssl/certs /etc/ssl/certs
 COPY --from=ca-trust /usr/share/ca-certificates /usr/share/ca-certificates
@@ -42,6 +44,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PATH=/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     GOTELEMETRY=off \
     SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH}
+ADD --checksum=sha256:5b6326f1932cfd7be57130561dc78192f09ed9f58bfbe6606ed0c50510c3b6cd https://archive.ubuntu.com/ubuntu/pool/main/c/ca-certificates/ca-certificates_20260816ubuntu0.26.04.1_all.deb /opt/pasturestack-ca-certificates.deb
 RUN set -eux; \
     . /tmp/ubuntu-apt.lock; \
     printf 'Types: deb\nURIs: https://snapshot.ubuntu.com/ubuntu/%s/\nSuites: %s %s-updates %s-backports %s-security\nComponents: main universe restricted multiverse\nSigned-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg\n' \
@@ -54,12 +57,19 @@ RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
         build-essential="${UBUNTU_APT_BUILD_ESSENTIAL_VERSION}" \
-        ca-certificates="${UBUNTU_APT_CA_CERTIFICATES_VERSION}" \
+        ca-certificates="${UBUNTU_APT_CA_CERTIFICATES_BOOTSTRAP_VERSION}" \
         curl="${UBUNTU_APT_CURL_VERSION}" \
         file="${UBUNTU_APT_FILE_VERSION}" \
         gcc="${UBUNTU_APT_GCC_VERSION}" \
         libc6-dev="${UBUNTU_APT_LIBC6_DEV_VERSION}" \
         tar="${UBUNTU_APT_TAR_VERSION}"; \
+    dpkg -i /opt/pasturestack-ca-certificates.deb && \
+    update-ca-certificates --fresh && \
+    test "$(dpkg-query -W -f='${Version}' ca-certificates)" = '20260816ubuntu0.26.04.1' && \
+    test ! -e /usr/share/ca-certificates/mozilla/emSign_ECC_Root_CA_-_G3.crt && \
+    rm -f /opt/pasturestack-ca-certificates.deb && \
+    sh /usr/local/bin/install-ubuntu-security-updates /tmp/ubuntu-security-packages.lock /etc/ssl/certs/ca-certificates.crt && \
+    rm -f /usr/bin/pebble && \
     rm -rf /var/lib/apt/lists/*; \
     case "${BUILDARCH}" in \
         amd64) go_arch=amd64; go_sha="${GO_LINUX_AMD64_SHA256}" ;; \
@@ -98,6 +108,12 @@ RUN set -eux; \
         download_json="$(go mod download -json "golang.org/x/text@v${GO_X_TEXT_VERSION}")"; \
         printf '%s\n' "${download_json}" | grep -Fq '"Sum": "h1:'"${GO_X_TEXT_SUM}"'"'; \
         printf '%s\n' "${download_json}" | grep -Fq '"GoModSum": "h1:'"${GO_X_TEXT_GO_MOD_SUM}"'"'; \
+        go get golang.org/x/crypto@v0.57.0 golang.org/x/net@v0.60.0 golang.org/x/text@v0.42.0 google.golang.org/grpc@v1.83.2 \
+          go.opentelemetry.io/otel/sdk@v1.45.0 \
+          go.opentelemetry.io/otel/exporters/otlp/otlptrace@v1.45.0 \
+          go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc@v1.45.0 \
+          go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp@v1.45.0; \
+        go mod download all; \
         go mod verify; \
     done; \
     text_license="$(go env GOMODCACHE)/golang.org/x/text@v${GO_X_TEXT_VERSION}/LICENSE"; \
@@ -137,6 +153,14 @@ RUN set -eux; \
         (cd etcdctl && CGO_ENABLED=0 GOOS=linux GOARCH="${TARGETARCH}" go build -p=2 -buildvcs=false -mod=readonly -trimpath -ldflags="${go_ldflags}" -o "/tmp/${pass}/etcdctl" .); \
         (cd etcdutl && CGO_ENABLED=0 GOOS=linux GOARCH="${TARGETARCH}" go build -p=2 -buildvcs=false -mod=readonly -trimpath -ldflags="${go_ldflags}" -o "/tmp/${pass}/etcdutl" .); \
     done; \
+    install -d /image-root/usr/share/doc/pasturestack-etcd-image; \
+    for component in server etcdctl etcdutl; do \
+        (cd "$component" && GOPROXY=off go list -mod=readonly -buildvcs=false -deps .) \
+          > "/image-root/usr/share/doc/pasturestack-etcd-image/${component}-package-graph.txt"; \
+        test -s "/image-root/usr/share/doc/pasturestack-etcd-image/${component}-package-graph.txt"; \
+        if grep -Eq '^golang.org/x/crypto/openpgp(/|$)' \
+            "/image-root/usr/share/doc/pasturestack-etcd-image/${component}-package-graph.txt"; then exit 1; fi; \
+    done; \
     cmp /tmp/first/etcd /tmp/second/etcd; \
     cmp /tmp/first/etcdctl /tmp/second/etcdctl; \
     cmp /tmp/first/etcdutl /tmp/second/etcdutl; \
@@ -166,7 +190,8 @@ RUN set -eux; \
         /image-root/usr/local/bin/etcd --version | grep -F "etcd Version: ${IMAGE_VERSION}"; \
         /image-root/usr/local/bin/etcdctl version | grep -F "etcdctl version: ${IMAGE_VERSION}"; \
         /image-root/usr/local/bin/etcdutl version | grep -F "etcdutl version: ${IMAGE_VERSION}"; \
-    fi
+    fi; \
+    go clean -cache -modcache
 
 FROM scratch AS etcd-builder
 COPY --from=etcd-builder-build / /
@@ -178,7 +203,7 @@ ARG SOURCE_REVISION=unknown
 ARG UPSTREAM_TAG=v3.7.1
 ARG UPSTREAM_VERSION=3.7.1
 ARG UPSTREAM_COMMIT=5e7fd0de9a57db03ecc11794dc40403a734c07bb
-ARG GO_X_TEXT_VERSION=0.39.0
+ARG GO_X_TEXT_VERSION=0.42.0
 LABEL org.opencontainers.image.source="https://github.com/PastureStack/etcd-image" \
       org.opencontainers.image.title="PastureStack etcd image" \
       org.opencontainers.image.description="Maintained etcd image for reviewed compatibility migration" \

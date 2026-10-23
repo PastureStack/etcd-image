@@ -1,0 +1,22 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://github.com/PastureStack/etcd-image/security/runtime-openpgp/2026-10-23",
+  "author": "PastureStack contributors",
+  "timestamp": "2026-10-23T15:05:00Z",
+  "version": 1,
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "GO-2026-5932"
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/golang.org/x/crypto@v0.57.0"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "The exact etcd, etcdctl and etcdutl source package graphs are generated during the same offline build and fail if any golang.org/x/crypto/openpgp package is present. The graphs accompany the exact static binaries. The finding applies only to that unmaintained package subtree, which is not imported or compiled into these commands."
+    }
+  ]
+}

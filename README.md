@@ -18,15 +18,17 @@ The candidate is not published or deployed by this repository review. It remains
 | Source commit | `5e7fd0de9a57db03ecc11794dc40403a734c07bb` |
 | Source archive SHA-256 | `a9254be36198b8240fe1a5ea8018e67d9fdc148146888e7dec60c019ddc8870c` |
 | Source date epoch | `1784835042` |
-| Go toolchain | `1.27.0` |
-| `golang.org/x/text` | `0.39.0` |
+| Go toolchain | `1.27.3` |
+| `golang.org/x/text` | `0.42.0` |
 | Builder base | Ubuntu 26.04, content-pinned |
 | APT snapshot | `20260808T000000Z` with exact direct-package versions |
 | Target architectures | `linux/amd64`, `linux/arm64` |
 
 The source tag maps to a signed annotated tag object and a verified signed commit. The build consumes the immutable commit archive and verifies its SHA-256 before extraction. It also verifies the Go archive, Go checksum-database records, dependency license hash, source version, and every direct APT package version.
 
-The narrowly scoped `golang.org/x/text` update removes the vulnerable `v0.37.0` selected by the official source without changing the etcd storage format or protocol implementation. The resulting binaries are static, built twice, and compared byte for byte.
+The dependency security updates select `golang.org/x/text 0.42.0`, `golang.org/x/net 0.60.0`, and OpenTelemetry 1.45.0 without changing the etcd storage format or protocol implementation. The resulting binaries are static, built twice, and compared byte for byte.
+
+The candidate gate scans complete runtime and build-environment reports. Available fixes block at every severity. Exact LOW/MEDIUM findings without an official fix require a vendor-backed ledger; the separately verified userspace-header and OpenPGP boundaries do not permit fixed or unregistered findings. Compilation caches are removed after the binaries and source package graphs are produced, so unrelated upstream example executables are not retained in the builder image. This technical work does not waive the existing human legal/provenance release gate in `LICENSE-STATUS.md`; the candidate is not a published release.
 
 ## Build
 
@@ -73,3 +75,7 @@ Repository-origin evidence, the official source license, the official source lic
 - [COMPATIBILITY.md](COMPATIBILITY.md) — tested and untested boundaries
 - [SECURITY.md](SECURITY.md) — security and supply-chain controls
 - [LICENSE-STATUS.md](LICENSE-STATUS.md) — inherited license-integrity evidence
+
+## October 2026 security maintenance
+
+Maintained Go builds select the patched Go 1.27.3 compiler without raising the existing Go language requirement. Ubuntu build/runtime stages apply the checksum-pinned `ca-certificates 20260816ubuntu0.26.04.1` security package after their frozen APT baseline; the final trust store and installed version are verified. Release artifacts must pass the repository's existing checks before publication.
