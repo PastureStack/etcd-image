@@ -21,9 +21,9 @@ ARG BUILDARCH=amd64
 ARG GO_VERSION=1.27.3
 ARG GO_LINUX_AMD64_SHA256=65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40
 ARG GO_LINUX_ARM64_SHA256=a06e99309dbcbdca1a8ccd2282c3ee146e55930886e26b4f1193269587165f49
-ARG GO_X_TEXT_VERSION=0.39.0
-ARG GO_X_TEXT_SUM=UbZz4pLOvn600D6Oh6GGEI6VAmndrEBLv8/6BEXzyus=
-ARG GO_X_TEXT_GO_MOD_SUM=3UwRclnC2g0TU9x8PZiyfOajCd1zaUNHF9cvqcQZ+ZM=
+ARG GO_X_TEXT_VERSION=0.42.0
+ARG GO_X_TEXT_SUM=JbOZXgfeCPU9gacVtYliJqOhD+zhrEqK4LfdpmlUZqI=
+ARG GO_X_TEXT_GO_MOD_SUM=ojzP1Z+2QtioaF8DTtO8K5q7JWVVYwZKenzujK0Zd0E=
 ARG GO_X_TEXT_LICENSE_SHA256=911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad
 ARG UPSTREAM_REPOSITORY=etcd-io/etcd
 ARG UPSTREAM_TAG=v3.7.1
@@ -69,6 +69,7 @@ RUN set -eux; \
     test ! -e /usr/share/ca-certificates/mozilla/emSign_ECC_Root_CA_-_G3.crt && \
     rm -f /opt/pasturestack-ca-certificates.deb && \
     sh /usr/local/bin/install-ubuntu-security-updates /tmp/ubuntu-security-packages.lock /etc/ssl/certs/ca-certificates.crt && \
+    rm -f /usr/bin/pebble && \
     rm -rf /var/lib/apt/lists/*; \
     case "${BUILDARCH}" in \
         amd64) go_arch=amd64; go_sha="${GO_LINUX_AMD64_SHA256}" ;; \
@@ -107,6 +108,7 @@ RUN set -eux; \
         download_json="$(go mod download -json "golang.org/x/text@v${GO_X_TEXT_VERSION}")"; \
         printf '%s\n' "${download_json}" | grep -Fq '"Sum": "h1:'"${GO_X_TEXT_SUM}"'"'; \
         printf '%s\n' "${download_json}" | grep -Fq '"GoModSum": "h1:'"${GO_X_TEXT_GO_MOD_SUM}"'"'; \
+        go get golang.org/x/crypto@v0.57.0 golang.org/x/net@v0.60.0 golang.org/x/text@v0.42.0 google.golang.org/grpc@v1.83.2; \
         go mod verify; \
     done; \
     text_license="$(go env GOMODCACHE)/golang.org/x/text@v${GO_X_TEXT_VERSION}/LICENSE"; \
@@ -187,7 +189,7 @@ ARG SOURCE_REVISION=unknown
 ARG UPSTREAM_TAG=v3.7.1
 ARG UPSTREAM_VERSION=3.7.1
 ARG UPSTREAM_COMMIT=5e7fd0de9a57db03ecc11794dc40403a734c07bb
-ARG GO_X_TEXT_VERSION=0.39.0
+ARG GO_X_TEXT_VERSION=0.42.0
 LABEL org.opencontainers.image.source="https://github.com/PastureStack/etcd-image" \
       org.opencontainers.image.title="PastureStack etcd image" \
       org.opencontainers.image.description="Maintained etcd image for reviewed compatibility migration" \
