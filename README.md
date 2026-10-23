@@ -18,7 +18,7 @@ The candidate is not published or deployed by this repository review. It remains
 | Source commit | `5e7fd0de9a57db03ecc11794dc40403a734c07bb` |
 | Source archive SHA-256 | `a9254be36198b8240fe1a5ea8018e67d9fdc148146888e7dec60c019ddc8870c` |
 | Source date epoch | `1784835042` |
-| Go toolchain | `1.27.0` |
+| Go toolchain | `1.27.3` |
 | `golang.org/x/text` | `0.39.0` |
 | Builder base | Ubuntu 26.04, content-pinned |
 | APT snapshot | `20260808T000000Z` with exact direct-package versions |
@@ -73,3 +73,7 @@ Repository-origin evidence, the official source license, the official source lic
 - [COMPATIBILITY.md](COMPATIBILITY.md) — tested and untested boundaries
 - [SECURITY.md](SECURITY.md) — security and supply-chain controls
 - [LICENSE-STATUS.md](LICENSE-STATUS.md) — inherited license-integrity evidence
+
+## October 2026 security maintenance
+
+Maintained Go builds select the patched Go 1.27.3 compiler without raising the existing Go language requirement. Ubuntu build/runtime stages apply the checksum-pinned `ca-certificates 20260816ubuntu0.26.04.1` security package after their frozen APT baseline; the final trust store and installed version are verified. Release artifacts must pass the repository's existing checks before publication.
