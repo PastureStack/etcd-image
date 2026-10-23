@@ -35,14 +35,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p dist
-          python3 .github/scripts/test_builder_vulnerability_policy.py
-          jq -s '.[0] + {statements:(.[0].statements + .[1].statements)}' \
-            security/openvex.json security/runtime-openvex.json > dist/combined-openvex.json
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           git merge-base --is-ancestor 216f3f4b662039369a775caa4986518ec3f96e1e HEAD
           test -z "$(git status --porcelain)"
           bash scripts/validate
+          mkdir -p dist
+          PYTHONDONTWRITEBYTECODE=1 python3 .github/scripts/test_builder_vulnerability_policy.py
+          jq -s '.[0] + {statements:(.[0].statements + .[1].statements)}' \
+            security/openvex.json security/runtime-openvex.json > dist/combined-openvex.json
           jq -e '.statements | length == 295' security/openvex.json >/dev/null
           jq -e '[.statements[].status] | all(. == "not_affected")' security/openvex.json >/dev/null
           printf '%s\n' "${GITHUB_SHA}" > dist/source-revision.txt
