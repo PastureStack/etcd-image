@@ -26,7 +26,9 @@ The candidate is not published or deployed by this repository review. It remains
 
 The source tag maps to a signed annotated tag object and a verified signed commit. The build consumes the immutable commit archive and verifies its SHA-256 before extraction. It also verifies the Go archive, Go checksum-database records, dependency license hash, source version, and every direct APT package version.
 
-The narrowly scoped `golang.org/x/text` update removes the vulnerable `v0.37.0` selected by the official source without changing the etcd storage format or protocol implementation. The resulting binaries are static, built twice, and compared byte for byte.
+The dependency security updates select `golang.org/x/text 0.42.0`, `golang.org/x/net 0.60.0`, and OpenTelemetry 1.45.0 without changing the etcd storage format or protocol implementation. The resulting binaries are static, built twice, and compared byte for byte.
+
+The candidate gate scans complete runtime and build-environment reports. Available fixes block at every severity. Exact LOW/MEDIUM findings without an official fix require a vendor-backed ledger; the separately verified userspace-header and OpenPGP boundaries do not permit fixed or unregistered findings. Compilation caches are removed after the binaries and source package graphs are produced, so unrelated upstream example executables are not retained in the builder image. This technical work does not waive the existing human legal/provenance release gate in `LICENSE-STATUS.md`; the candidate is not a published release.
 
 ## Build
 

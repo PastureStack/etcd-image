@@ -108,7 +108,11 @@ RUN set -eux; \
         download_json="$(go mod download -json "golang.org/x/text@v${GO_X_TEXT_VERSION}")"; \
         printf '%s\n' "${download_json}" | grep -Fq '"Sum": "h1:'"${GO_X_TEXT_SUM}"'"'; \
         printf '%s\n' "${download_json}" | grep -Fq '"GoModSum": "h1:'"${GO_X_TEXT_GO_MOD_SUM}"'"'; \
-        go get golang.org/x/crypto@v0.57.0 golang.org/x/net@v0.60.0 golang.org/x/text@v0.42.0 google.golang.org/grpc@v1.83.2; \
+        go get golang.org/x/crypto@v0.57.0 golang.org/x/net@v0.60.0 golang.org/x/text@v0.42.0 google.golang.org/grpc@v1.83.2 \
+          go.opentelemetry.io/otel/sdk@v1.45.0 \
+          go.opentelemetry.io/otel/exporters/otlp/otlptrace@v1.45.0 \
+          go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc@v1.45.0 \
+          go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp@v1.45.0; \
         go mod download all; \
         go mod verify; \
     done; \
@@ -149,6 +153,14 @@ RUN set -eux; \
         (cd etcdctl && CGO_ENABLED=0 GOOS=linux GOARCH="${TARGETARCH}" go build -p=2 -buildvcs=false -mod=readonly -trimpath -ldflags="${go_ldflags}" -o "/tmp/${pass}/etcdctl" .); \
         (cd etcdutl && CGO_ENABLED=0 GOOS=linux GOARCH="${TARGETARCH}" go build -p=2 -buildvcs=false -mod=readonly -trimpath -ldflags="${go_ldflags}" -o "/tmp/${pass}/etcdutl" .); \
     done; \
+    install -d /image-root/usr/share/doc/pasturestack-etcd-image; \
+    for component in server etcdctl etcdutl; do \
+        (cd "$component" && GOPROXY=off go list -mod=readonly -buildvcs=false -deps .) \
+          > "/image-root/usr/share/doc/pasturestack-etcd-image/${component}-package-graph.txt"; \
+        test -s "/image-root/usr/share/doc/pasturestack-etcd-image/${component}-package-graph.txt"; \
+        if grep -Eq '^golang.org/x/crypto/openpgp(/|$)' \
+            "/image-root/usr/share/doc/pasturestack-etcd-image/${component}-package-graph.txt"; then exit 1; fi; \
+    done; \
     cmp /tmp/first/etcd /tmp/second/etcd; \
     cmp /tmp/first/etcdctl /tmp/second/etcdctl; \
     cmp /tmp/first/etcdutl /tmp/second/etcdutl; \
@@ -178,7 +190,8 @@ RUN set -eux; \
         /image-root/usr/local/bin/etcd --version | grep -F "etcd Version: ${IMAGE_VERSION}"; \
         /image-root/usr/local/bin/etcdctl version | grep -F "etcdctl version: ${IMAGE_VERSION}"; \
         /image-root/usr/local/bin/etcdutl version | grep -F "etcdutl version: ${IMAGE_VERSION}"; \
-    fi
+    fi; \
+    go clean -cache -modcache
 
 FROM scratch AS etcd-builder
 COPY --from=etcd-builder-build / /

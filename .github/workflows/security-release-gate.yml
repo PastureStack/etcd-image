@@ -36,6 +36,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
+          python3 .github/scripts/test_builder_vulnerability_policy.py
+          jq -s '.[0] + {statements:(.[0].statements + .[1].statements)}' \
+            security/openvex.json security/runtime-openvex.json > dist/combined-openvex.json
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           git merge-base --is-ancestor 216f3f4b662039369a775caa4986518ec3f96e1e HEAD
           test -z "$(git status --porcelain)"
@@ -168,10 +171,19 @@ jobs:
               -v "${GITHUB_WORKSPACE}/dist:/evidence" \
               "${TRIVY_IMAGE}" image --cache-dir /tmp/trivy-cache \
               --skip-db-update --scanners vuln,secret \
-              --severity CRITICAL,HIGH --format json \
+              --list-all-pkgs --format json \
               --output "/evidence/${stem}-trivy.json" "${image_name}"
             if [ "${stem}" = candidate ]; then
-              cp dist/candidate-trivy.json dist/candidate-applicable-trivy.json
+              docker run --rm --user "$(id -u):$(id -g)" \
+                --group-add "${socket_group}" \
+                -v /var/run/docker.sock:/var/run/docker.sock \
+                -v "${TRIVY_CACHE_DIR}:/tmp/trivy-cache" \
+                -v "${GITHUB_WORKSPACE}:/workspace:ro" \
+                -v "${GITHUB_WORKSPACE}/dist:/evidence" \
+                "${TRIVY_IMAGE}" image --cache-dir /tmp/trivy-cache \
+                --skip-db-update --scanners vuln,secret --list-all-pkgs \
+                --vex /workspace/security/runtime-openvex.json --format json \
+                --output /evidence/candidate-applicable-trivy.json "${image_name}"
             else
               docker run --rm --user "$(id -u):$(id -g)" \
                 --group-add "${socket_group}" \
@@ -181,8 +193,8 @@ jobs:
                 -v "${GITHUB_WORKSPACE}/dist:/evidence" \
                 "${TRIVY_IMAGE}" image --cache-dir /tmp/trivy-cache \
                 --skip-db-update --scanners vuln,secret \
-                --vex /workspace/security/openvex.json \
-                --severity CRITICAL,HIGH --format json \
+                --vex /evidence/combined-openvex.json \
+                --list-all-pkgs --format json \
                 --output /evidence/builder-applicable-trivy.json "${image_name}"
             fi
             docker run --rm --user "$(id -u):$(id -g)" \
@@ -200,6 +212,12 @@ jobs:
         run: |
           set -euo pipefail
           source_secrets=$(jq '[.Results[]?.Secrets[]?] | length' dist/source-secrets.json)
+          for report in dist/candidate-trivy.json dist/builder-trivy.json; do
+            test "$(jq '[.Results[]?.Vulnerabilities[]? | select((.FixedVersion // "") != "")] | length' "$report")" -eq 0
+          done
+          bash .github/scripts/check-builder-header-boundary.sh "$BUILDER_IMAGE" > dist/dapper-header-boundary.json
+          python3 .github/scripts/enforce-runtime-vulnerabilities.py --scope builder --repository PastureStack/etcd-image < dist/builder-applicable-trivy.json
+          python3 .github/scripts/enforce-runtime-vulnerabilities.py --repository PastureStack/etcd-image < dist/candidate-applicable-trivy.json
 
           jq -r '.statements[] | .vulnerability.name as $cve | .products[] | [$cve, .["@id"]] | @tsv' \
             security/openvex.json | LC_ALL=C sort -u > dist/openvex-statements.tsv
