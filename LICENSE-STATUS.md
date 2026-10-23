@@ -21,7 +21,7 @@ The candidate image keeps these records distinct:
 - `LICENSE-STATUS.md` — this integrity notice;
 - `LICENSE.etcd-upstream` — the license from official etcd source commit `5e7fd0de9a57db03ecc11794dc40403a734c07bb`;
 - `ETCD-UPSTREAM-BILL-OF-MATERIALS.json` and its override — the official source's dependency-license inventory; and
-- `LICENSE.golang.org-x-text` — the license from the pinned `golang.org/x/text v0.39.0` module.
+- `LICENSE.golang.org-x-text` — the license from the pinned `golang.org/x/text v0.42.0` module.
 
 The official source license SHA-256 is `43ca1b4bbf462789ba15b28373e0c536e510f49e4d05d85a7690cfee94de6f49`. The pinned `golang.org/x/text` license SHA-256 is `911f8f5782931320f5b8d1160a76365b83aea6447ee6c04fa6d5591467db9dad`.
 

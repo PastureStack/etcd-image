@@ -109,6 +109,7 @@ RUN set -eux; \
         printf '%s\n' "${download_json}" | grep -Fq '"Sum": "h1:'"${GO_X_TEXT_SUM}"'"'; \
         printf '%s\n' "${download_json}" | grep -Fq '"GoModSum": "h1:'"${GO_X_TEXT_GO_MOD_SUM}"'"'; \
         go get golang.org/x/crypto@v0.57.0 golang.org/x/net@v0.60.0 golang.org/x/text@v0.42.0 google.golang.org/grpc@v1.83.2; \
+        go mod download all; \
         go mod verify; \
     done; \
     text_license="$(go env GOMODCACHE)/golang.org/x/text@v${GO_X_TEXT_VERSION}/LICENSE"; \
