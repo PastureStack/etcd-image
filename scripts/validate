@@ -88,9 +88,9 @@ if grep -R -Eiq \
     exit 1
 fi
 
-if [ "$(grep -Fc '"status":"not_affected"' security/openvex.json)" -ne 46 ] || \
-   [ "$(grep -Fc '"justification":"vulnerable_code_not_present"' security/openvex.json)" -ne 46 ] || \
-   [ "$(grep -Fc 'pkg:deb/ubuntu/linux-libc-dev@7.0.0-29.29?arch=amd64&distro=ubuntu-26.04' security/openvex.json)" -ne 46 ]; then
+if [ "$(grep -Fc '"status":"not_affected"' security/openvex.json)" -ne 295 ] || \
+   [ "$(grep -Fc '"justification":"vulnerable_code_not_present"' security/openvex.json)" -ne 295 ] || \
+   [ "$(grep -Fc 'pkg:deb/ubuntu/linux-libc-dev@7.0.0-38.38?arch=amd64&distro=ubuntu-26.04' security/openvex.json)" -ne 295 ]; then
     echo ETCD_IMAGE_OPENVEX_SCOPE_CHANGED >&2
     exit 1
 fi

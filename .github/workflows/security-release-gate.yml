@@ -40,7 +40,7 @@ jobs:
           git merge-base --is-ancestor 216f3f4b662039369a775caa4986518ec3f96e1e HEAD
           test -z "$(git status --porcelain)"
           bash scripts/validate
-          jq -e '.statements | length == 46' security/openvex.json >/dev/null
+          jq -e '.statements | length == 295' security/openvex.json >/dev/null
           jq -e '[.statements[].status] | all(. == "not_affected")' security/openvex.json >/dev/null
           printf '%s\n' "${GITHUB_SHA}" > dist/source-revision.txt
           cp package/ubuntu-apt.lock package/upstream-source.lock security/openvex.json dist/
@@ -205,7 +205,7 @@ jobs:
             security/openvex.json | LC_ALL=C sort -u > dist/openvex-statements.tsv
           jq -r '.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL" or .Severity == "HIGH") | [.VulnerabilityID, .PkgIdentifier.PURL] | @tsv' \
             dist/builder-trivy.json | LC_ALL=C sort -u > dist/builder-openvex-input.tsv
-          test "$(wc -l < dist/openvex-statements.tsv)" -eq 46
+          test "$(wc -l < dist/openvex-statements.tsv)" -eq 295
           diff -u dist/openvex-statements.tsv dist/builder-openvex-input.tsv
 
           candidate_raw_critical=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL")] | length' dist/candidate-trivy.json)

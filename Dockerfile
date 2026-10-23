@@ -35,6 +35,8 @@ ARG UPSTREAM_ARCHIVE_SHA256=a9254be36198b8240fe1a5ea8018e67d9fdc148146888e7dec60
 ARG SOURCE_DATE_EPOCH=1784835042
 
 COPY package/ubuntu-apt.lock /tmp/ubuntu-apt.lock
+COPY package/ubuntu-security-packages.lock /tmp/ubuntu-security-packages.lock
+COPY scripts/install-ubuntu-security-updates /usr/local/bin/install-ubuntu-security-updates
 COPY --from=ca-trust /etc/ca-certificates.conf /etc/ca-certificates.conf
 COPY --from=ca-trust /etc/ssl/certs /etc/ssl/certs
 COPY --from=ca-trust /usr/share/ca-certificates /usr/share/ca-certificates
@@ -66,6 +68,7 @@ RUN set -eux; \
     test "$(dpkg-query -W -f='${Version}' ca-certificates)" = '20260816ubuntu0.26.04.1' && \
     test ! -e /usr/share/ca-certificates/mozilla/emSign_ECC_Root_CA_-_G3.crt && \
     rm -f /opt/pasturestack-ca-certificates.deb && \
+    sh /usr/local/bin/install-ubuntu-security-updates /tmp/ubuntu-security-packages.lock /etc/ssl/certs/ca-certificates.crt && \
     rm -rf /var/lib/apt/lists/*; \
     case "${BUILDARCH}" in \
         amd64) go_arch=amd64; go_sha="${GO_LINUX_AMD64_SHA256}" ;; \
