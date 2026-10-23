@@ -53,7 +53,7 @@ jobs:
             --build-arg UPSTREAM_REPOSITORY=etcd-io/etcd
             --build-arg UPSTREAM_TAG=v3.7.1
             --build-arg UPSTREAM_VERSION=3.7.1
-            --build-arg UPSTREAM_GO_VERSION=1.27.0
+            --build-arg UPSTREAM_GO_VERSION=1.26.5
             --build-arg UPSTREAM_COMMIT=5e7fd0de9a57db03ecc11794dc40403a734c07bb
             --build-arg UPSTREAM_ARCHIVE_SHA256=a9254be36198b8240fe1a5ea8018e67d9fdc148146888e7dec60c019ddc8870c
             --build-arg SOURCE_DATE_EPOCH=1784835042
